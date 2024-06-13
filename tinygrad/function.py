@@ -37,12 +37,36 @@ class Reciprocal(Function):
     return grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
 
 class Sin(Function):
+  coeffs = [((-1) ** n / math.factorial(2 * n + 1)) for n in range(5)]
+
+  @staticmethod
+  def _approx_sin(x: LazyBuffer) -> LazyBuffer:
+    x = (
+      x.e(UnaryOps.NEG)
+      .e(BinaryOps.MAX, x.const(-math.pi).e(BinaryOps.ADD, x))
+      .e(UnaryOps.NEG)
+    )
+    x = x.e(BinaryOps.MAX, x.const(-math.pi).e(BinaryOps.SUB, x))
+    x = (
+      x.e(UnaryOps.NEG)
+      .e(BinaryOps.MAX, x.const(-math.pi).e(BinaryOps.ADD, x))
+      .e(UnaryOps.NEG)
+    )
+    approx = x.const(0)
+    acc = x
+    for c in Sin.coeffs:
+      approx = approx.e(BinaryOps.ADD, x.const(c).e(BinaryOps.MUL, acc))
+      acc = acc.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x)
+    return approx
+
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    return x.e(UnaryOps.SIN)
+    return Sin._approx_sin(x)
+    # return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+    return Sin._approx_sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
+    # return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
