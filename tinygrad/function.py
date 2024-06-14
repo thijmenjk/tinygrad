@@ -37,7 +37,7 @@ class Reciprocal(Function):
     return grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
 
 class Sin(Function):
-  coeffs = [((-1) ** n / math.factorial(2 * n + 1)) for n in range(12)]
+  coeffs = [((-1) ** n / math.factorial(2 * n + 1)) for n in range(15)]
 
   @staticmethod
   def _approx_sin(x: LazyBuffer) -> LazyBuffer:
