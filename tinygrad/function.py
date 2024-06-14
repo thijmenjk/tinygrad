@@ -37,27 +37,22 @@ class Reciprocal(Function):
     return grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
 
 class Sin(Function):
-  coeffs = [((-1) ** n / math.factorial(2 * n + 1)) for n in range(10)]
+  coeffs = [((-1) ** n / math.factorial(2 * n + 1)) for n in range(11)]
   pi = math.pi
   two_pi = 2 * pi
   two_pi_inv = 1 / two_pi
-
   one_over_period = 0.15915494309189535
-  round_to_integer = 6755399441055744
-
   period1 = 6.28318524360656738280
   period2 = 6.35730190941127867664e-8
 
-
   @staticmethod
   def _approx_sin(x: LazyBuffer) -> LazyBuffer:
-    x_dtype = x.dtype
-    x = x.cast(dtypes.float64)
-
-    n = x.e(BinaryOps.MUL, x.const(Sin.one_over_period)).e(BinaryOps.ADD, x.const(Sin.round_to_integer)).e(BinaryOps.SUB, x.const(Sin.round_to_integer))
-
+    n = x.e(BinaryOps.MUL, x.const(Sin.one_over_period))
+    # floor k
+    n_trunc = n.cast(dtypes.int64).cast(x.dtype)
+    n_lt_n_trunc = n.e(BinaryOps.CMPLT, n_trunc)
+    n = n_lt_n_trunc.e(TernaryOps.WHERE, n_trunc.e(BinaryOps.SUB, x.const(1)), n_trunc)
     x = x.e(BinaryOps.SUB, n.e(BinaryOps.MUL, x.const(Sin.period1))).e(BinaryOps.SUB, n.e(BinaryOps.MUL, x.const(Sin.period2)))
-
 
     approx = x.const(0)
     acc = x
@@ -65,7 +60,7 @@ class Sin(Function):
       approx = approx.e(BinaryOps.ADD, x.const(c).e(BinaryOps.MUL, acc))
       acc = acc.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x)
 
-    return approx.cast(x_dtype)
+    return approx
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
