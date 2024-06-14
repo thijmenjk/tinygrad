@@ -41,6 +41,8 @@ class Sin(Function):
 
   @staticmethod
   def _approx_sin(x: LazyBuffer) -> LazyBuffer:
+    ret_dtype = x.dtype
+    x = x.cast(dtypes.float64)
     x = (
       x.e(UnaryOps.NEG)
       .e(BinaryOps.MAX, x.const(-math.pi).e(BinaryOps.ADD, x))
@@ -57,7 +59,7 @@ class Sin(Function):
     for c in Sin.coeffs:
       approx = approx.e(BinaryOps.ADD, x.const(c).e(BinaryOps.MUL, acc))
       acc = acc.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x)
-    return approx
+    return approx.cast(ret_dtype)
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
