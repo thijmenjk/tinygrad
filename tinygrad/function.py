@@ -37,7 +37,7 @@ class Reciprocal(Function):
     return grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
 
 class Sin(Function):
-  coeffs = [((-1) ** n / math.factorial(2 * n + 1)) for n in range(16)]
+  coeffs = [((-1) ** n / math.factorial(2 * n + 1)) for n in range(14)]
   inv_two_pi_high = 0.159154943091895
   inv_two_pi_low  = 3.357688837633725e-16
   two_pi_high     = 6.283185307179586
@@ -45,8 +45,6 @@ class Sin(Function):
 
   @staticmethod
   def _approx_sin(x: LazyBuffer) -> LazyBuffer:
-    x_dtype = x.dtype
-    if x.device != "METAL": x = x.cast(dtypes.double)
     k_high = x.e(BinaryOps.MUL, x.const(Sin.inv_two_pi_high))
     k_low = x.e(BinaryOps.MUL, x.const(Sin.inv_two_pi_low))
     k = k_high.e(BinaryOps.ADD, k_low)
@@ -66,7 +64,7 @@ class Sin(Function):
     for c in Sin.coeffs:
       approx = approx.e(BinaryOps.ADD, x.const(c).e(BinaryOps.MUL, acc))
       acc = acc.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x)
-    return approx.cast(x_dtype)
+    return approx
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
