@@ -44,20 +44,38 @@ class Sin(Function):
   two_pi_low      = 4.769252867665590e-16
 
   @staticmethod
+  def _floor(x: LazyBuffer) -> LazyBuffer:
+    x_trunc = x.cast(dtypes.int64).cast(x.dtype)
+    x_lt_x_trunc = x.e(BinaryOps.CMPLT, x_trunc)
+    x_floor = x_lt_x_trunc.e(TernaryOps.WHERE, x_trunc.e(BinaryOps.SUB, x.const(1)), x_trunc)
+    return x_floor
+
+  @staticmethod
+  def _mul_by_high_low_const(x: LazyBuffer, high, low) -> LazyBuffer:
+    x_high = x.e(BinaryOps.MUL, x.const(high))
+    x_low = x.e(BinaryOps.MUL, x.const(low))
+    return x_high.e(BinaryOps.ADD, x_low)
+
+
+  @staticmethod
   def _approx_sin(x: LazyBuffer) -> LazyBuffer:
-    k_high = x.e(BinaryOps.MUL, x.const(Sin.inv_two_pi_high))
-    k_low = x.e(BinaryOps.MUL, x.const(Sin.inv_two_pi_low))
-    k = k_high.e(BinaryOps.ADD, k_low)
+    k = Sin._mul_by_high_low_const(x, Sin.inv_two_pi_high, Sin.inv_two_pi_low)
+    k = Sin._floor(k)
 
-    k_trunc = k.cast(dtypes.int64).cast(x.dtype)
-    k_lt_k_trunc = k.e(BinaryOps.CMPLT, k_trunc)
-    k = k_lt_k_trunc.e(TernaryOps.WHERE, k_trunc.e(BinaryOps.SUB, x.const(1)), k_trunc)
-
-    r_high = k.e(BinaryOps.MUL, x.const(Sin.two_pi_high))
-    r_low = k.e(BinaryOps.MUL, x.const(Sin.two_pi_low))
-    r = r_high.e(BinaryOps.ADD, r_low)
-
+    r = Sin._mul_by_high_low_const(k, Sin.two_pi_high, Sin.two_pi_low)
     x = x.e(BinaryOps.SUB, r)
+
+    x = (
+      x.e(UnaryOps.NEG)
+      .e(BinaryOps.MAX, x.const(-math.pi).e(BinaryOps.ADD, x))
+      .e(UnaryOps.NEG)
+    )
+    x = x.e(BinaryOps.MAX, x.const(-math.pi).e(BinaryOps.SUB, x))
+    x = (
+      x.e(UnaryOps.NEG)
+      .e(BinaryOps.MAX, x.const(-math.pi).e(BinaryOps.ADD, x))
+      .e(UnaryOps.NEG)
+    )
 
     approx = x.const(0)
     acc = x
