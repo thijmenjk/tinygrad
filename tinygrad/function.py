@@ -37,7 +37,7 @@ class Reciprocal(Function):
     return grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
 
 class Sin(Function):
-  coeffs = [((-1) ** n / math.factorial(2 * n + 1)) for n in range(10)]
+  coeffs = [((-1) ** n / math.factorial(2 * n + 1)) for n in range(14)]
   two_pi_first      = 6.283185307179586
   two_pi_second     = 4.769252867665590e-16
   inv_two_pi_first  = 0.159154943091895
@@ -53,9 +53,9 @@ class Sin(Function):
     k = k_lt_k_trunc.e(TernaryOps.WHERE, k_trunc.e(BinaryOps.SUB, x.const(1)), k_trunc)
 
     r = (
-         x.e(UnaryOps.NEG).e(BinaryOps.ADD, 
+         x.e(UnaryOps.NEG).e(BinaryOps.ADD,
            k.e(BinaryOps.MUL, x.const(Sin.two_pi_first))
-         ).e(BinaryOps.ADD, 
+         ).e(BinaryOps.ADD,
            k.e(BinaryOps.MUL, x.const(Sin.two_pi_second))
          ).e(UnaryOps.NEG)
     )
