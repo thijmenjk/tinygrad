@@ -45,6 +45,9 @@ class Sin(Function):
 
   @staticmethod
   def _approx_sin(x: LazyBuffer) -> LazyBuffer:
+    x_dtype = x.dtype
+    if x.device != "metal":
+      x = x.cast(dtypes.double)
     k_high = x.e(BinaryOps.MUL, x.const(Sin.inv_two_pi_high))
     k_low = x.e(BinaryOps.MUL, x.const(Sin.inv_two_pi_low))
     k = k_high.e(BinaryOps.ADD, k_low)
@@ -59,23 +62,12 @@ class Sin(Function):
 
     x = x.e(BinaryOps.SUB, r)
 
-    x = (
-      x.e(UnaryOps.NEG)
-      .e(BinaryOps.MAX, x.const(-math.pi).e(BinaryOps.ADD, x))
-      .e(UnaryOps.NEG)
-    )
-    x = x.e(BinaryOps.MAX, x.const(-math.pi).e(BinaryOps.SUB, x))
-    x = (
-      x.e(UnaryOps.NEG)
-      .e(BinaryOps.MAX, x.const(-math.pi).e(BinaryOps.ADD, x))
-      .e(UnaryOps.NEG)
-    )
     approx = x.const(0)
     acc = x
     for c in Sin.coeffs:
       approx = approx.e(BinaryOps.ADD, x.const(c).e(BinaryOps.MUL, acc))
       acc = acc.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x)
-    return approx
+    return approx.cast(x_dtype)
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
