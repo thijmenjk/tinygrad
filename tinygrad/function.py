@@ -38,16 +38,26 @@ class Reciprocal(Function):
 
 class Sin(Function):
   coeffs = [((-1) ** n / math.factorial(2 * n + 1)) for n in range(16)]
-  two_pi = 2 * math.pi
-  two_pi_inv = 1 / two_pi
+  inv_two_pi_high = 0.159154943091895
+  inv_two_pi_low  = 3.357688837633725e-16
+  two_pi_high     = 6.283185307179586
+  two_pi_low      = 4.769252867665590e-16
 
   @staticmethod
   def _approx_sin(x: LazyBuffer) -> LazyBuffer:
-    k = x.e(BinaryOps.MUL, x.const(Sin.two_pi_inv))
+    k_high = x.e(BinaryOps.MUL, x.const(Sin.inv_two_pi_high))
+    k_low = x.e(BinaryOps.MUL, x.const(Sin.inv_two_pi_low))
+    k = k_high.e(BinaryOps.ADD, k_low)
+
     k_trunc = k.cast(dtypes.int64).cast(x.dtype)
     k_lt_k_trunc = k.e(BinaryOps.CMPLT, k_trunc)
     k = k_lt_k_trunc.e(TernaryOps.WHERE, k_trunc.e(BinaryOps.SUB, x.const(1)), k_trunc)
-    x = x.e(BinaryOps.SUB, k.e(BinaryOps.MUL, x.const(Sin.two_pi)))
+
+    r_high = k.e(BinaryOps.MUL, x.const(Sin.two_pi_high))
+    r_low = k.e(BinaryOps.MUL, x.const(Sin.two_pi_low))
+    r = r_high.e(BinaryOps.ADD, r_low)
+
+    x = x.e(BinaryOps.SUB, r)
 
     x = (
       x.e(UnaryOps.NEG)
