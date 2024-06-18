@@ -36,62 +36,53 @@ class Reciprocal(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
 
+def _taylor(x: LazyBuffer, coeffs, base) -> LazyBuffer:
+  approx, acc = x.const(0), base
+  for c in coeffs:
+    approx = approx.e(BinaryOps.ADD, x.const(c).e(BinaryOps.MUL, acc))
+    acc = acc.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x)
+  return approx
+
+def _taylor_sin(x: LazyBuffer) -> LazyBuffer:
+  return _taylor(x, [((-1) ** n / math.factorial(2 * n + 1)) for n in range(6)], x)
+
+def _taylor_cos(x: LazyBuffer) -> LazyBuffer:
+  return _taylor(x, [((-1) ** n / math.factorial(2 * n)) for n in range(6)], x.const(1))
+
+def _reduce(x: LazyBuffer) -> LazyBuffer:
+  k = x.e(BinaryOps.MUL, x.const(2/math.pi)).cast(dtypes.int32 if x.dtype.itemsize == 2 else dtypes.int64)
+  return k.e(BinaryOps.MOD, k.const(4)), x.e(BinaryOps.SUB, k.cast(x.dtype).e(BinaryOps.MUL, x.const(math.pi/2)))
+
+def _approx_sin(x: LazyBuffer) -> LazyBuffer:
+  o = x
+  if (x_dtype := x.dtype).itemsize == 2: x = x.cast(dtypes.float32)
+  elif x.device != "METAL": x = x.cast(dtypes.float64)
+  sign = x.e(BinaryOps.CMPLT, x.const(0))
+  def flip(x): return sign.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
+  n, x = _reduce(flip(x))
+  x = flip(n.e(BinaryOps.CMPLT, n.const(1)).e(TernaryOps.WHERE, _taylor_sin(x), 
+                n.e(BinaryOps.CMPLT, n.const(2)).e(TernaryOps.WHERE, _taylor_cos(x), 
+                  n.e(BinaryOps.CMPLT, n.const(3)).e(TernaryOps.WHERE, _taylor_sin(x).e(UnaryOps.NEG), _taylor_cos(x).e(UnaryOps.NEG)))))
+
+  if x_dtype.itemsize == 2: return x.cast(x_dtype)
+  o_lt_ub = o.e(BinaryOps.CMPLT, o.const(8796110476607))
+  o_gt_lb = o.const(-8797948865538).e(BinaryOps.CMPLT, o)
+  return o_lt_ub.e(TernaryOps.WHERE, o_gt_lb.e(TernaryOps.WHERE, x.cast(x_dtype), o.e(UnaryOps.SIN)), o.e(UnaryOps.SIN))
+
+def _sin(x: LazyBuffer) -> LazyBuffer: return x.e(UnaryOps.SIN)
+
 class Sin(Function):
-  coeffs = [((-1) ** n / math.factorial(2 * n + 1)) for n in range(14)]
-  inv_two_pi_high = 0.159154943091895
-  inv_two_pi_low  = 3.357688837633725e-16
-  two_pi_high     = 6.283185307179586
-  two_pi_low      = 4.769252867665590e-16
-
-  @staticmethod
-  def _floor(x: LazyBuffer) -> LazyBuffer:
-    x_trunc = x.cast(dtypes.int64).cast(x.dtype)
-    x_lt_x_trunc = x.e(BinaryOps.CMPLT, x_trunc)
-    x_floor = x_lt_x_trunc.e(TernaryOps.WHERE, x_trunc.e(BinaryOps.SUB, x.const(1)), x_trunc)
-    return x_floor
-
-  @staticmethod
-  def _mul_by_high_low_const(x: LazyBuffer, high, low) -> LazyBuffer:
-    x_high = x.e(BinaryOps.MUL, x.const(high))
-    x_low = x.e(BinaryOps.MUL, x.const(low))
-    return x_high.e(BinaryOps.ADD, x_low)
-
-
-  @staticmethod
-  def _approx_sin(x: LazyBuffer) -> LazyBuffer:
-    k = Sin._mul_by_high_low_const(x, Sin.inv_two_pi_high, Sin.inv_two_pi_low)
-    k = Sin._floor(k)
-
-    r = Sin._mul_by_high_low_const(k, Sin.two_pi_high, Sin.two_pi_low)
-    x = x.e(BinaryOps.SUB, r)
-
-    x = (
-      x.e(UnaryOps.NEG)
-      .e(BinaryOps.MAX, x.const(-math.pi).e(BinaryOps.ADD, x))
-      .e(UnaryOps.NEG)
-    )
-    x = x.e(BinaryOps.MAX, x.const(-math.pi).e(BinaryOps.SUB, x))
-    x = (
-      x.e(UnaryOps.NEG)
-      .e(BinaryOps.MAX, x.const(-math.pi).e(BinaryOps.ADD, x))
-      .e(UnaryOps.NEG)
-    )
-
-    approx = x.const(0)
-    acc = x
-    for c in Sin.coeffs:
-      approx = approx.e(BinaryOps.ADD, x.const(c).e(BinaryOps.MUL, acc))
-      acc = acc.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x)
-    return approx
+  def _use_approx(self): return self.x.dtype.itemsize in (2, 4, 8)
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    return Sin._approx_sin(x)
-    # return x.e(UnaryOps.SIN)
+    self.fn = _approx_sin if self._use_approx() else _sin
+    return self.fn(x)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return Sin._approx_sin(self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)).e(BinaryOps.MUL, grad_output)
-    # return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
+    return self.fn(
+      self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)
+    ).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
