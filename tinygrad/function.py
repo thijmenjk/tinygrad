@@ -43,11 +43,13 @@ def _taylor(x: LazyBuffer, coeffs, base) -> LazyBuffer:
     acc = acc.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x)
   return approx
 
+def _nterms(x:LazyBuffer) -> int: return {2: 6, 4: 12, 8: 16}[x.dtype.itemsize]
+
 def _taylor_sin(x: LazyBuffer) -> LazyBuffer:
-  return _taylor(x, [((-1) ** n / math.factorial(2 * n + 1)) for n in range(6)], x)
+  return _taylor(x, [((-1) ** n / math.factorial(2 * n + 1)) for n in range(_nterms(x))], x)
 
 def _taylor_cos(x: LazyBuffer) -> LazyBuffer:
-  return _taylor(x, [((-1) ** n / math.factorial(2 * n)) for n in range(6)], x.const(1))
+  return _taylor(x, [((-1) ** n / math.factorial(2 * n)) for n in range(_nterms(x))], x.const(1))
 
 def _reduce(x: LazyBuffer) -> LazyBuffer:
   k = x.e(BinaryOps.MUL, x.const(2/math.pi)).cast(dtypes.int32 if x.dtype.itemsize == 2 else dtypes.int64)
@@ -60,8 +62,8 @@ def _approx_sin(x: LazyBuffer) -> LazyBuffer:
   sign = x.e(BinaryOps.CMPLT, x.const(0))
   def flip(x): return sign.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
   n, x = _reduce(flip(x))
-  x = flip(n.e(BinaryOps.CMPLT, n.const(1)).e(TernaryOps.WHERE, _taylor_sin(x), 
-                n.e(BinaryOps.CMPLT, n.const(2)).e(TernaryOps.WHERE, _taylor_cos(x), 
+  x = flip(n.e(BinaryOps.CMPLT, n.const(1)).e(TernaryOps.WHERE, _taylor_sin(x),
+                n.e(BinaryOps.CMPLT, n.const(2)).e(TernaryOps.WHERE, _taylor_cos(x),
                   n.e(BinaryOps.CMPLT, n.const(3)).e(TernaryOps.WHERE, _taylor_sin(x).e(UnaryOps.NEG), _taylor_cos(x).e(UnaryOps.NEG)))))
 
   if x_dtype.itemsize == 2: return x.cast(x_dtype)
