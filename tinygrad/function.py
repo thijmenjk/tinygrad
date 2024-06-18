@@ -74,7 +74,7 @@ def _approx_sin(x: LazyBuffer) -> LazyBuffer:
 def _sin(x: LazyBuffer) -> LazyBuffer: return x.e(UnaryOps.SIN)
 
 class Sin(Function):
-  def _use_approx(self): return self.x.dtype.itemsize in (2, 4, 8) and self.x.dtype.name in ("half", "float", "double", "__bf16")
+  def _use_approx(self): return self.x.dtype.name in ("half",)
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
