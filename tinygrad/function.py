@@ -36,55 +36,46 @@ class Reciprocal(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.ret).e(BinaryOps.MUL, self.ret)
 
-def _taylor(x: LazyBuffer, coeffs, base) -> LazyBuffer:
-  approx, acc = x.const(0), base
-  for c in coeffs:
-    approx = approx.e(BinaryOps.ADD, x.const(c).e(BinaryOps.MUL, acc))
-    acc = acc.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x)
-  return approx
-
-def _nterms(x:LazyBuffer) -> int: return {2: 6, 4: 14, 8: 18}[x.dtype.itemsize]
-
-def _taylor_sin(x: LazyBuffer) -> LazyBuffer:
-  return _taylor(x, [((-1) ** n / math.factorial(2 * n + 1)) for n in range(_nterms(x))], x)
-
-def _taylor_cos(x: LazyBuffer) -> LazyBuffer:
-  return _taylor(x, [((-1) ** n / math.factorial(2 * n)) for n in range(_nterms(x))], x.const(1))
-
-def _reduce(x: LazyBuffer) -> LazyBuffer:
-  k = x.e(BinaryOps.MUL, x.const(2/math.pi)).cast(dtypes.int32 if x.dtype.itemsize == 2 else dtypes.int64)
-  return k.e(BinaryOps.MOD, k.const(4)), x.e(BinaryOps.SUB, k.cast(x.dtype).e(BinaryOps.MUL, x.const(math.pi/2)))
-
-def _approx_sin(x: LazyBuffer) -> LazyBuffer:
-  o = x
-  if (x_dtype := x.dtype).itemsize == 2: x = x.cast(dtypes.float32)
-  elif x.device != "METAL": x = x.cast(dtypes.float64)
-  sign = x.e(BinaryOps.CMPLT, x.const(0))
-  def flip(x): return sign.e(TernaryOps.WHERE, x.e(UnaryOps.NEG), x)
-  n, x = _reduce(flip(x))
-  x = flip(n.e(BinaryOps.CMPLT, n.const(1)).e(TernaryOps.WHERE, _taylor_sin(x),
-                n.e(BinaryOps.CMPLT, n.const(2)).e(TernaryOps.WHERE, _taylor_cos(x),
-                  n.e(BinaryOps.CMPLT, n.const(3)).e(TernaryOps.WHERE, _taylor_sin(x).e(UnaryOps.NEG), _taylor_cos(x).e(UnaryOps.NEG)))))
-
-  if x_dtype.itemsize == 2: return x.cast(x_dtype)
-  o_lt_ub = o.e(BinaryOps.CMPLT, o.const(8796110476607))
-  o_gt_lb = o.const(-8797948865538).e(BinaryOps.CMPLT, o)
-  return o_lt_ub.e(TernaryOps.WHERE, o_gt_lb.e(TernaryOps.WHERE, x.cast(x_dtype), o.e(UnaryOps.SIN)), o.e(UnaryOps.SIN))
-
-def _sin(x: LazyBuffer) -> LazyBuffer: return x.e(UnaryOps.SIN)
-
 class Sin(Function):
-  def _use_approx(self): return self.x.dtype.name in ("half",)
+  coeffs = [((-1) ** n / math.factorial(2 * n + 1)) for n in range(16)]
+  two_pi = 2 * math.pi
+  two_pi_inv = 1 / two_pi
+
+  @staticmethod
+  def _approx_sin(x: LazyBuffer) -> LazyBuffer:
+    k = x.e(BinaryOps.MUL, x.const(Sin.two_pi_inv))
+    k_trunc = k.cast(dtypes.int64).cast(x.dtype)
+    k_lt_k_trunc = k.e(BinaryOps.CMPLT, k_trunc)
+    k = k_lt_k_trunc.e(TernaryOps.WHERE, k_trunc.e(BinaryOps.SUB, x.const(1)), k_trunc)
+    x = x.e(BinaryOps.SUB, k.e(BinaryOps.MUL, x.const(Sin.two_pi)))
+
+    x = (
+      x.e(UnaryOps.NEG)
+      .e(BinaryOps.MAX, x.const(-math.pi).e(BinaryOps.ADD, x))
+      .e(UnaryOps.NEG)
+    )
+    x = x.e(BinaryOps.MAX, x.const(-math.pi).e(BinaryOps.SUB, x))
+    x = (
+      x.e(UnaryOps.NEG)
+      .e(BinaryOps.MAX, x.const(-math.pi).e(BinaryOps.ADD, x))
+      .e(UnaryOps.NEG)
+    )
+    approx = x.const(0)
+    acc = x
+    for c in Sin.coeffs:
+      approx = approx.e(BinaryOps.ADD, x.const(c).e(BinaryOps.MUL, acc))
+      acc = acc.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x)
+    return approx
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    self.fn = _approx_sin if self._use_approx() else _sin
-    return self.fn(x)
+    return Sin._approx_sin(x) if x.dtype.name == "half" else x.e(UnaryOps.SIN)
+    # return x.e(UnaryOps.SIN)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.fn(
-      self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)
-    ).e(BinaryOps.MUL, grad_output)
+    x = self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x)
+    return (Sin._approx_sin(x) if x.dtype.name == "half" else x).e(BinaryOps.MUL, grad_output)
+    # return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
