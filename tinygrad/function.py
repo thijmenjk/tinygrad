@@ -43,7 +43,7 @@ def _taylor(x: LazyBuffer, coeffs, base) -> LazyBuffer:
     acc = acc.e(BinaryOps.MUL, x).e(BinaryOps.MUL, x)
   return approx
 
-def _nterms(x:LazyBuffer) -> int: return {2: 6, 4: 12, 8: 16}[x.dtype.itemsize]
+def _nterms(x:LazyBuffer) -> int: return {2: 6, 4: 14, 8: 18}[x.dtype.itemsize]
 
 def _taylor_sin(x: LazyBuffer) -> LazyBuffer:
   return _taylor(x, [((-1) ** n / math.factorial(2 * n + 1)) for n in range(_nterms(x))], x)
@@ -74,7 +74,7 @@ def _approx_sin(x: LazyBuffer) -> LazyBuffer:
 def _sin(x: LazyBuffer) -> LazyBuffer: return x.e(UnaryOps.SIN)
 
 class Sin(Function):
-  def _use_approx(self): return self.x.dtype.itemsize in (2, 4, 8)
+  def _use_approx(self): return self.x.dtype.itemsize in (2, 4, 8) and self.x.dtype.name in ("half", "float", "double", "__bf16")
 
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
